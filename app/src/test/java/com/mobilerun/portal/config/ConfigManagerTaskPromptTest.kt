@@ -98,6 +98,23 @@ class ConfigManagerTaskPromptTest {
     }
 
     @Test
+    fun noA11yMode_defaultsToFalse() {
+        val configManager = ConfigManager.getInstance(context)
+
+        assertFalse(configManager.noA11yMode)
+    }
+
+    @Test
+    fun noA11yMode_persistsAcrossProcessRestart() {
+        val initial = ConfigManager.getInstance(context)
+        initial.noA11yMode = true
+
+        clearSingleton()
+
+        assertTrue(ConfigManager.getInstance(context).noA11yMode)
+    }
+
+    @Test
     fun clearKeepAliveRuntimeState_clearsRecoveryMetadata() {
         val configManager = ConfigManager.getInstance(context)
         configManager.keepAliveLastRecoveryAtMs = 1234L

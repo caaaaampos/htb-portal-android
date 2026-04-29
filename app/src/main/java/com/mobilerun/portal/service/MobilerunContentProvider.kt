@@ -3,11 +3,13 @@ package com.mobilerun.portal.service
 import android.content.ContentProvider
 import android.content.Context
 import android.content.ContentValues
+import android.content.Intent
 import android.content.UriMatcher
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Binder
+import android.util.Base64
 import android.util.Log
 import androidx.core.net.toUri
 import com.mobilerun.portal.api.ApiHandler
@@ -20,8 +22,6 @@ import com.mobilerun.portal.keepalive.KeepAliveStartupException
 import com.mobilerun.portal.triggers.TriggerApi
 import com.mobilerun.portal.triggers.TriggerApiResult
 
-import android.util.Base64
-
 internal fun handleKeepScreenAwakeInsert(
     providerContext: Context,
     enabled: Boolean,
@@ -32,6 +32,105 @@ internal fun handleKeepScreenAwakeInsert(
     } catch (e: KeepAliveStartupException) {
         ApiResponse.Error(e.reason)
     }
+}
+
+internal fun handleNoA11yModeInsert(
+    providerContext: Context,
+    configManager: ConfigManager,
+    enabled: Boolean,
+    accessibilityServiceAvailable: Boolean = MobilerunAccessibilityService.getInstance() != null,
+    portalServiceRunning: Boolean = PortalService.getInstance() != null,
+    startPortalService: (Context) -> Unit = { context ->
+        context.startForegroundService(Intent(context, PortalService::class.java))
+    },
+    stopPortalService: (Context) -> Unit = { context ->
+        context.stopService(Intent(context, PortalService::class.java))
+    },
+): ApiResponse {
+    if (enabled) {
+        if (accessibilityServiceAvailable) {
+            return ApiResponse.Error("Disable AccessibilityService first")
+        }
+        configManager.noA11yMode = true
+        if (!portalServiceRunning) {
+            try {
+                startPortalService(providerContext)
+                Log.i("MobilerunContentProvider", "No-a11y mode enabled, PortalService starting")
+            } catch (e: Exception) {
+                Log.w(
+                    "MobilerunContentProvider",
+                    "startForegroundService failed (service may need manual start): ${e.message}",
+                )
+            }
+        } else {
+            Log.i("MobilerunContentProvider", "No-a11y mode enabled, PortalService already running")
+        }
+    } else {
+        configManager.noA11yMode = false
+        try {
+            stopPortalService(providerContext)
+            Log.i("MobilerunContentProvider", "No-a11y mode disabled, PortalService stopped")
+        } catch (e: Exception) {
+            Log.w("MobilerunContentProvider", "stopService failed: ${e.message}")
+        }
+    }
+    return ApiResponse.Success("no_a11y_mode=$enabled")
+}
+
+internal fun ensurePortalServiceIfNoA11y(
+    providerContext: Context?,
+    configManager: ConfigManager,
+    portalServiceRunning: Boolean = PortalService.getInstance() != null,
+    startPortalService: (Context) -> Unit = { context ->
+        context.startForegroundService(Intent(context, PortalService::class.java))
+    },
+) {
+    if (!configManager.noA11yMode) return
+    if (portalServiceRunning) return
+    val context = providerContext ?: return
+    try {
+        startPortalService(context)
+        Log.i("MobilerunContentProvider", "Restarted PortalService (no-a11y mode persisted)")
+    } catch (e: Exception) {
+        Log.w("MobilerunContentProvider", "Could not restart PortalService: ${e.message}")
+    }
+}
+
+internal fun handleSocketServerToggleInsert(
+    configManager: ConfigManager,
+    values: ContentValues?,
+    ensurePortalService: () -> Unit,
+): ApiResponse {
+    val port = values?.getAsInteger("port") ?: configManager.socketServerPort
+    val enabled = values?.getAsBoolean("enabled") ?: true
+    ensurePortalService()
+    if (values?.containsKey("port") == true) {
+        configManager.setSocketServerPortWithNotification(port)
+    }
+    configManager.setSocketServerEnabledWithNotification(enabled)
+    return ApiResponse.Success("HTTP server ${if (enabled) "enabled" else "disabled"} on port $port")
+}
+
+internal fun handleWebSocketServerToggleInsert(
+    configManager: ConfigManager,
+    values: ContentValues?,
+    ensurePortalService: () -> Unit,
+): ApiResponse {
+    val port = values?.getAsInteger("port") ?: configManager.websocketPort
+    val enabled = values?.getAsBoolean("enabled") ?: true
+    ensurePortalService()
+    if (enabled) {
+        if (values?.containsKey("port") == true) {
+            configManager.setWebSocketPortWithNotification(port)
+        }
+        configManager.setWebSocketEnabledWithNotification(true)
+    } else {
+        configManager.setWebSocketEnabledWithNotification(false)
+        if (values?.containsKey("port") == true) {
+            configManager.websocketPort = port
+        }
+    }
+    return ApiResponse.Success("WebSocket server ${if (enabled) "enabled" else "disabled"} on port $port")
 }
 
 class MobilerunContentProvider : ContentProvider() {
@@ -68,6 +167,7 @@ class MobilerunContentProvider : ContentProvider() {
         private const val TRIGGERS_RUNS_CLEAR = 28
         private const val TOGGLE_SCREEN_KEEP_AWAKE = 29
         private const val SCREEN_KEEP_AWAKE_STATUS = 30
+        private const val SET_NO_A11Y_MODE = 31
 
         private val uriMatcher = UriMatcher(UriMatcher.NO_MATCH).apply {
             addURI(AUTHORITY, "a11y_tree", A11Y_TREE)
@@ -100,6 +200,7 @@ class MobilerunContentProvider : ContentProvider() {
             addURI(AUTHORITY, "triggers/runs/clear", TRIGGERS_RUNS_CLEAR)
             addURI(AUTHORITY, "toggle_screen_keep_awake", TOGGLE_SCREEN_KEEP_AWAKE)
             addURI(AUTHORITY, "screen_keep_awake_status", SCREEN_KEEP_AWAKE_STATUS)
+            addURI(AUTHORITY, "set_no_a11y_mode", SET_NO_A11Y_MODE)
         }
     }
 
@@ -265,12 +366,46 @@ class MobilerunContentProvider : ContentProvider() {
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? {
         enforceAuthorizedCaller()
+        val match = uriMatcher.match(uri)
         val triggerResult = handleTriggerInsert(uri, values)
         if (triggerResult != null) {
             return mutationResultUri(triggerResult)
         }
 
-        if (uriMatcher.match(uri) == TOGGLE_SCREEN_KEEP_AWAKE) {
+        if (match == SET_NO_A11Y_MODE) {
+            val enabled = values?.getAsBoolean("enabled") ?: true
+            val response = handleNoA11yModeInsert(
+                providerContext = context
+                    ?: return "content://$AUTHORITY/result?status=error&message=${Uri.encode("context unavailable")}".toUri(),
+                configManager = configManager,
+                enabled = enabled,
+            )
+            return responseToResultUri(response)
+        }
+
+        if (match == TOGGLE_SOCKET_SERVER) {
+            val response = handleSocketServerToggleInsert(
+                configManager = configManager,
+                values = values,
+                ensurePortalService = {
+                    ensurePortalServiceIfNoA11y(context, configManager)
+                },
+            )
+            return responseToResultUri(response)
+        }
+
+        if (match == TOGGLE_WEBSOCKET_SERVER) {
+            val response = handleWebSocketServerToggleInsert(
+                configManager = configManager,
+                values = values,
+                ensurePortalService = {
+                    ensurePortalServiceIfNoA11y(context, configManager)
+                },
+            )
+            return responseToResultUri(response)
+        }
+
+        if (match == TOGGLE_SCREEN_KEEP_AWAKE) {
             val enabled = values?.getAsBoolean("enabled")
                 ?: return "content://$AUTHORITY/result?status=error&message=${Uri.encode("Missing required field: enabled")}".toUri()
             val response = handleKeepScreenAwakeInsert(
@@ -286,7 +421,7 @@ class MobilerunContentProvider : ContentProvider() {
         }
 
         val result = try {
-            val response = when (uriMatcher.match(uri)) {
+            val response = when (match) {
                 KEYBOARD_ACTIONS -> {
                     val action = uri.lastPathSegment
                     val vals = values ?: ContentValues()
@@ -315,31 +450,6 @@ class MobilerunContentProvider : ContentProvider() {
                 OVERLAY_VISIBLE -> {
                     val visible = values?.getAsBoolean("visible") ?: true
                     handler.setOverlayVisible(visible)
-                }
-
-                TOGGLE_SOCKET_SERVER -> {
-                    val port = values?.getAsInteger("port") ?: configManager.socketServerPort
-                    val enabled = values?.getAsBoolean("enabled") ?: true
-
-                    if (values?.containsKey("port") == true) {
-                        configManager.setSocketServerPortWithNotification(port)
-                    }
-                    configManager.setSocketServerEnabledWithNotification(enabled)
-
-                    ApiResponse.Success("HTTP server ${if (enabled) "enabled" else "disabled"} on port $port")
-                }
-
-                TOGGLE_WEBSOCKET_SERVER -> {
-                    val port = values?.getAsInteger("port") ?: configManager.websocketPort
-                    val enabled = values?.getAsBoolean("enabled") ?: true
-
-                    // Apply port change first so enabling starts on the requested port.
-                    if (values?.containsKey("port") == true) {
-                        configManager.setWebSocketPortWithNotification(port)
-                    }
-                    configManager.setWebSocketEnabledWithNotification(enabled)
-
-                    ApiResponse.Success("WebSocket server ${if (enabled) "enabled" else "disabled"} on port $port")
                 }
 
                 CONFIGURE_REVERSE_CONNECTION -> {

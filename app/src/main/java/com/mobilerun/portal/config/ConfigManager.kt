@@ -81,6 +81,7 @@ class ConfigManager private constructor(private val context: Context) {
         private const val KEY_ACTIVE_TASK_TERMINAL_RETURN_HANDLED = "active_task_terminal_return_handled"
         private const val KEY_ACTIVE_TASK_TERMINAL_TRANSITION_HANDLED =
             "active_task_terminal_transition_handled"
+        private const val KEY_NO_A11Y_MODE = "no_a11y_mode"
         private const val PREFIX_EVENT_ENABLED = "event_enabled_"
         private const val KEY_AUTH_TOKEN = "auth_token"
         private const val KEY_DEVICE_ID = "device_id"
@@ -177,6 +178,13 @@ class ConfigManager private constructor(private val context: Context) {
         get() = sharedPrefs.getBoolean(KEY_AUTO_OFFSET_CALCULATED, false)
         set(value) {
             sharedPrefs.edit { putBoolean(KEY_AUTO_OFFSET_CALCULATED, value) }
+        }
+
+    // No-a11y mode: when true, PortalService hosts local servers instead of AccessibilityService.
+    var noA11yMode: Boolean
+        get() = sharedPrefs.getBoolean(KEY_NO_A11Y_MODE, false)
+        set(value) {
+            sharedPrefs.edit(commit = true) { putBoolean(KEY_NO_A11Y_MODE, value) }
         }
 
     // Socket server enabled (REST API)

@@ -80,6 +80,12 @@
             android:foregroundServiceType="dataSync" />
 
         <service
+            android:name=".service.PortalService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name=".service.ScreenCaptureService"
             android:enabled="true"
             android:exported="false"
