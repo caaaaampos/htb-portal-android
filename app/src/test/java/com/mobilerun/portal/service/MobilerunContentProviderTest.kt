@@ -161,7 +161,83 @@ class MobilerunContentProviderTest {
     }
 
     @Test
-    fun handleSocketServerToggleInsert_updatesConfigWithoutAccessibilityHandler() {
+    fun ensureLocalServerHostAvailableForEnable_allowsAccessibilityServiceHost() {
+        val context = mockk<Context>(relaxed = true)
+        val configManager = mockk<ConfigManager>()
+        var startCalled = false
+
+        val result = ensureLocalServerHostAvailableForEnable(
+            providerContext = context,
+            configManager = configManager,
+            accessibilityServiceAvailable = true,
+            portalServiceRunning = false,
+            startPortalService = { startCalled = true },
+        )
+
+        assertEquals(null, result)
+        assertFalse(startCalled)
+    }
+
+    @Test
+    fun ensureLocalServerHostAvailableForEnable_rejectsWhenNoHostModeIsActive() {
+        val context = mockk<Context>(relaxed = true)
+        val configManager = mockk<ConfigManager>()
+
+        every { configManager.noA11yMode } returns false
+
+        val result = ensureLocalServerHostAvailableForEnable(
+            providerContext = context,
+            configManager = configManager,
+            accessibilityServiceAvailable = false,
+            portalServiceRunning = false,
+        )
+
+        assertEquals(
+            ApiResponse.Error("AccessibilityService or no-a11y mode required to enable local servers"),
+            result,
+        )
+    }
+
+    @Test
+    fun ensureLocalServerHostAvailableForEnable_startsPortalServiceWhenNoA11yModeIsActive() {
+        val context = mockk<Context>(relaxed = true)
+        val configManager = mockk<ConfigManager>()
+        var startCalled = false
+
+        every { configManager.noA11yMode } returns true
+
+        val result = ensureLocalServerHostAvailableForEnable(
+            providerContext = context,
+            configManager = configManager,
+            accessibilityServiceAvailable = false,
+            portalServiceRunning = false,
+            startPortalService = { startCalled = true },
+        )
+
+        assertEquals(null, result)
+        assertTrue(startCalled)
+    }
+
+    @Test
+    fun ensureLocalServerHostAvailableForEnable_returnsErrorWhenPortalServiceStartFails() {
+        val context = mockk<Context>(relaxed = true)
+        val configManager = mockk<ConfigManager>()
+
+        every { configManager.noA11yMode } returns true
+
+        val result = ensureLocalServerHostAvailableForEnable(
+            providerContext = context,
+            configManager = configManager,
+            accessibilityServiceAvailable = false,
+            portalServiceRunning = false,
+            startPortalService = { throw RuntimeException("foreground_service_start_not_allowed") },
+        )
+
+        assertEquals(ApiResponse.Error("foreground_service_start_not_allowed"), result)
+    }
+
+    @Test
+    fun handleSocketServerToggleInsert_updatesConfigWhenHostIsAvailable() {
         val configManager = mockk<ConfigManager>(relaxed = true)
         val values = mockk<ContentValues>()
         var ensureCalled = false
@@ -175,7 +251,10 @@ class MobilerunContentProviderTest {
         val result = handleSocketServerToggleInsert(
             configManager = configManager,
             values = values,
-            ensurePortalService = { ensureCalled = true },
+            ensureLocalServerHost = {
+                ensureCalled = true
+                null
+            },
         )
 
         assertEquals(ApiResponse.Success("HTTP server enabled on port 9090"), result)
@@ -186,7 +265,61 @@ class MobilerunContentProviderTest {
     }
 
     @Test
-    fun handleWebSocketServerToggleInsert_updatesConfigWithoutAccessibilityHandler() {
+    fun handleSocketServerToggleInsert_rejectsEnableWhenNoHostIsAvailable() {
+        val configManager = mockk<ConfigManager>(relaxed = true)
+        val values = mockk<ContentValues>()
+
+        every { values.getAsInteger("port") } returns 9090
+        every { values.getAsBoolean("enabled") } returns true
+        every { values.containsKey("port") } returns true
+        every { configManager.socketServerEnabled } returns false
+        every { configManager.socketServerPort } returns 8080
+
+        val result = handleSocketServerToggleInsert(
+            configManager = configManager,
+            values = values,
+            ensureLocalServerHost = {
+                ApiResponse.Error("AccessibilityService or no-a11y mode required to enable local servers")
+            },
+        )
+
+        assertEquals(
+            ApiResponse.Error("AccessibilityService or no-a11y mode required to enable local servers"),
+            result,
+        )
+        verify(exactly = 0) { configManager.socketServerPort = 9090 }
+        verify(exactly = 0) { configManager.setSocketServerEnabledWithNotification(any()) }
+        verify(exactly = 0) { configManager.setSocketServerPortWithNotification(any()) }
+    }
+
+    @Test
+    fun handleSocketServerToggleInsert_allowsDisableWithoutHost() {
+        val configManager = mockk<ConfigManager>(relaxed = true)
+        val values = mockk<ContentValues>()
+        var ensureCalled = false
+
+        every { values.getAsInteger("port") } returns null
+        every { values.getAsBoolean("enabled") } returns false
+        every { values.containsKey("port") } returns false
+        every { configManager.socketServerEnabled } returns true
+        every { configManager.socketServerPort } returns 8080
+
+        val result = handleSocketServerToggleInsert(
+            configManager = configManager,
+            values = values,
+            ensureLocalServerHost = {
+                ensureCalled = true
+                ApiResponse.Error("should not be called")
+            },
+        )
+
+        assertEquals(ApiResponse.Success("HTTP server disabled on port 8080"), result)
+        assertFalse(ensureCalled)
+        verify(exactly = 1) { configManager.setSocketServerEnabledWithNotification(false) }
+    }
+
+    @Test
+    fun handleWebSocketServerToggleInsert_updatesConfigWhenHostIsAvailable() {
         val configManager = mockk<ConfigManager>(relaxed = true)
         val values = mockk<ContentValues>()
         var ensureCalled = false
@@ -200,7 +333,10 @@ class MobilerunContentProviderTest {
         val result = handleWebSocketServerToggleInsert(
             configManager = configManager,
             values = values,
-            ensurePortalService = { ensureCalled = true },
+            ensureLocalServerHost = {
+                ensureCalled = true
+                null
+            },
         )
 
         assertEquals(ApiResponse.Success("WebSocket server enabled on port 9091"), result)
@@ -208,6 +344,60 @@ class MobilerunContentProviderTest {
         verify(exactly = 1) { configManager.websocketPort = 9091 }
         verify(exactly = 1) { configManager.setWebSocketEnabledWithNotification(true) }
         verify(exactly = 0) { configManager.setWebSocketPortWithNotification(any()) }
+    }
+
+    @Test
+    fun handleWebSocketServerToggleInsert_rejectsEnableWhenNoHostIsAvailable() {
+        val configManager = mockk<ConfigManager>(relaxed = true)
+        val values = mockk<ContentValues>()
+
+        every { values.getAsInteger("port") } returns 9091
+        every { values.getAsBoolean("enabled") } returns true
+        every { values.containsKey("port") } returns true
+        every { configManager.websocketEnabled } returns false
+        every { configManager.websocketPort } returns 8081
+
+        val result = handleWebSocketServerToggleInsert(
+            configManager = configManager,
+            values = values,
+            ensureLocalServerHost = {
+                ApiResponse.Error("AccessibilityService or no-a11y mode required to enable local servers")
+            },
+        )
+
+        assertEquals(
+            ApiResponse.Error("AccessibilityService or no-a11y mode required to enable local servers"),
+            result,
+        )
+        verify(exactly = 0) { configManager.websocketPort = 9091 }
+        verify(exactly = 0) { configManager.setWebSocketEnabledWithNotification(any()) }
+        verify(exactly = 0) { configManager.setWebSocketPortWithNotification(any()) }
+    }
+
+    @Test
+    fun handleWebSocketServerToggleInsert_allowsDisableWithoutHost() {
+        val configManager = mockk<ConfigManager>(relaxed = true)
+        val values = mockk<ContentValues>()
+        var ensureCalled = false
+
+        every { values.getAsInteger("port") } returns null
+        every { values.getAsBoolean("enabled") } returns false
+        every { values.containsKey("port") } returns false
+        every { configManager.websocketEnabled } returns true
+        every { configManager.websocketPort } returns 8081
+
+        val result = handleWebSocketServerToggleInsert(
+            configManager = configManager,
+            values = values,
+            ensureLocalServerHost = {
+                ensureCalled = true
+                ApiResponse.Error("should not be called")
+            },
+        )
+
+        assertEquals(ApiResponse.Success("WebSocket server disabled on port 8081"), result)
+        assertFalse(ensureCalled)
+        verify(exactly = 1) { configManager.setWebSocketEnabledWithNotification(false) }
     }
 
     @Test
@@ -225,7 +415,10 @@ class MobilerunContentProviderTest {
         val result = handleWebSocketServerToggleInsert(
             configManager = configManager,
             values = values,
-            ensurePortalService = { ensureCalled = true },
+            ensureLocalServerHost = {
+                ensureCalled = true
+                null
+            },
         )
 
         assertEquals(ApiResponse.Success("WebSocket server enabled on port 8081"), result)

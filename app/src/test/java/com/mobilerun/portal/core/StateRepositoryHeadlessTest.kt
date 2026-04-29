@@ -11,6 +11,7 @@ class StateRepositoryHeadlessTest {
         val repository = StateRepository(service = null)
         val phoneState = repository.getPhoneState()
 
+        assertFalse(repository.hasAccessibilityService)
         assertTrue(repository.getVisibleElements().isEmpty())
         assertNull(repository.getFullTree(filter = true))
         assertFalse(repository.setOverlayVisible(true))

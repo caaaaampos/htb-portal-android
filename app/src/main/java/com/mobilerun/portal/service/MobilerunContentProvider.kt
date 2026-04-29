@@ -85,30 +85,53 @@ internal fun ensurePortalServiceIfNoA11y(
         context.startForegroundService(Intent(context, PortalService::class.java))
     },
 ) {
-    if (!configManager.noA11yMode) return
-    if (portalServiceRunning) return
-    val context = providerContext ?: return
-    try {
+    ensureLocalServerHostAvailableForEnable(
+        providerContext = providerContext,
+        configManager = configManager,
+        accessibilityServiceAvailable = false,
+        portalServiceRunning = portalServiceRunning,
+        startPortalService = startPortalService,
+    )
+}
+
+internal fun ensureLocalServerHostAvailableForEnable(
+    providerContext: Context?,
+    configManager: ConfigManager,
+    accessibilityServiceAvailable: Boolean = MobilerunAccessibilityService.getInstance() != null,
+    portalServiceRunning: Boolean = PortalService.getInstance() != null,
+    startPortalService: (Context) -> Unit = { context ->
+        context.startForegroundService(Intent(context, PortalService::class.java))
+    },
+): ApiResponse? {
+    if (accessibilityServiceAvailable) return null
+    if (!configManager.noA11yMode) {
+        return ApiResponse.Error("AccessibilityService or no-a11y mode required to enable local servers")
+    }
+    if (portalServiceRunning) return null
+    val context = providerContext ?: return ApiResponse.Error("context unavailable")
+    return try {
         startPortalService(context)
         Log.i("MobilerunContentProvider", "Restarted PortalService (no-a11y mode persisted)")
+        null
     } catch (e: Exception) {
         Log.w("MobilerunContentProvider", "Could not restart PortalService: ${e.message}")
+        ApiResponse.Error(e.message ?: "PortalService start failed")
     }
 }
 
 internal fun handleSocketServerToggleInsert(
     configManager: ConfigManager,
     values: ContentValues?,
-    ensurePortalService: () -> Unit,
+    ensureLocalServerHost: () -> ApiResponse?,
 ): ApiResponse {
     val port = values?.getAsInteger("port") ?: configManager.socketServerPort
     val enabled = values?.getAsBoolean("enabled") ?: true
-    ensurePortalService()
     val hasPort = values?.containsKey("port") == true
     val wasEnabled = configManager.socketServerEnabled
     val currentPort = configManager.socketServerPort
 
     if (enabled) {
+        ensureLocalServerHost()?.let { return it }
         if (hasPort && port != currentPort) {
             if (wasEnabled) {
                 configManager.setSocketServerPortWithNotification(port)
@@ -133,16 +156,16 @@ internal fun handleSocketServerToggleInsert(
 internal fun handleWebSocketServerToggleInsert(
     configManager: ConfigManager,
     values: ContentValues?,
-    ensurePortalService: () -> Unit,
+    ensureLocalServerHost: () -> ApiResponse?,
 ): ApiResponse {
     val port = values?.getAsInteger("port") ?: configManager.websocketPort
     val enabled = values?.getAsBoolean("enabled") ?: true
-    ensurePortalService()
     val hasPort = values?.containsKey("port") == true
     val wasEnabled = configManager.websocketEnabled
     val currentPort = configManager.websocketPort
 
     if (enabled) {
+        ensureLocalServerHost()?.let { return it }
         if (hasPort && port != currentPort) {
             if (wasEnabled) {
                 configManager.setWebSocketPortWithNotification(port)
@@ -418,8 +441,8 @@ class MobilerunContentProvider : ContentProvider() {
             val response = handleSocketServerToggleInsert(
                 configManager = configManager,
                 values = values,
-                ensurePortalService = {
-                    ensurePortalServiceIfNoA11y(context, configManager)
+                ensureLocalServerHost = {
+                    ensureLocalServerHostAvailableForEnable(context, configManager)
                 },
             )
             return responseToResultUri(response)
@@ -429,8 +452,8 @@ class MobilerunContentProvider : ContentProvider() {
             val response = handleWebSocketServerToggleInsert(
                 configManager = configManager,
                 values = values,
-                ensurePortalService = {
-                    ensurePortalServiceIfNoA11y(context, configManager)
+                ensureLocalServerHost = {
+                    ensureLocalServerHostAvailableForEnable(context, configManager)
                 },
             )
             return responseToResultUri(response)

@@ -67,6 +67,7 @@ class ApiHandler(
         private const val MAX_ERROR_BODY_SIZE = 2048
         private const val ENABLE_UI_STOP_FALLBACK = true
         private const val FORCE_STOP_SCREEN_READY_TIMEOUT_MS = 5000L
+        private const val ACCESSIBILITY_SERVICE_NOT_AVAILABLE = "Accessibility service not available"
         const val ACTION_INSTALL_RESULT = "com.mobilerun.portal.action.INSTALL_RESULT"
         const val EXTRA_INSTALL_SUCCESS = "install_success"
         const val EXTRA_INSTALL_MESSAGE = "install_message"
@@ -119,24 +120,36 @@ class ApiHandler(
     // Queries
     fun ping() = ApiResponse.Success("pong")
 
+    private fun requireAccessibilityService(): ApiResponse.Error? {
+        return if (stateRepo.hasAccessibilityService) {
+            null
+        } else {
+            ApiResponse.Error(ACCESSIBILITY_SERVICE_NOT_AVAILABLE)
+        }
+    }
+
     fun getTree(): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val elements = stateRepo.getVisibleElements()
         val json = elements.map { JsonBuilders.elementNodeToJson(it) }
         return ApiResponse.Success(JSONArray(json).toString())
     }
 
     fun getTreeFull(filter: Boolean): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val tree = stateRepo.getFullTree(filter)
             ?: return ApiResponse.Error("No active window or root filtered out")
         return ApiResponse.Success(tree.toString())
     }
 
     fun getPhoneState(): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val state = stateRepo.getPhoneState()
         return ApiResponse.Success(JsonBuilders.phoneStateToJson(state).toString())
     }
 
     fun getState(): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val elements = stateRepo.getVisibleElements()
         val treeJson = elements.map { JsonBuilders.elementNodeToJson(it) }
         val phoneStateJson = JsonBuilders.phoneStateToJson(stateRepo.getPhoneState())
@@ -149,6 +162,7 @@ class ApiHandler(
     }
 
     fun getStateFull(filter: Boolean): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val tree = stateRepo.getFullTree(filter)
             ?: return ApiResponse.Error("No active window or root filtered out")
         val phoneStateJson = JsonBuilders.phoneStateToJson(stateRepo.getPhoneState())

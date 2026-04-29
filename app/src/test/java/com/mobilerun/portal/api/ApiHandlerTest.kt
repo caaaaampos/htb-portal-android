@@ -32,6 +32,26 @@ class ApiHandlerTest {
     }
 
     @Test
+    fun accessibilityReads_returnUnavailableWhenStateRepoHasNoService() {
+        val handler = createHandler(stateRepo = StateRepository(service = null), ime = null)
+        val expected = ApiResponse.Error("Accessibility service not available")
+
+        assertEquals(expected, handler.getTree())
+        assertEquals(expected, handler.getTreeFull(filter = true))
+        assertEquals(expected, handler.getPhoneState())
+        assertEquals(expected, handler.getState())
+        assertEquals(expected, handler.getStateFull(filter = true))
+    }
+
+    @Test
+    fun nonAccessibilityReads_stillWorkWhenStateRepoHasNoService() {
+        val handler = createHandler(stateRepo = StateRepository(service = null), ime = null)
+
+        assertEquals(ApiResponse.Success("pong"), handler.ping())
+        assertEquals(ApiResponse.Success("test-version"), handler.getVersion())
+    }
+
+    @Test
     fun keyboardKey_del_usesImeWhenActiveAndSelected() {
         val stateRepo = mockk<StateRepository>(relaxed = true)
         val ime = mockk<MobilerunKeyboardIME>()
