@@ -65,6 +65,7 @@ class ApiHandler(
         private const val INSTALL_FREE_SPACE_MARGIN_BYTES = 200L * 1024 * 1024 // 200 MiB
         private const val INSTALL_UI_DELAY_MS = 1000L
         private const val MAX_ERROR_BODY_SIZE = 2048
+        private const val STREAM_START_NOTIFICATION_ID = 3001
         private const val ENABLE_UI_STOP_FALLBACK = true
         private const val FORCE_STOP_SCREEN_READY_TIMEOUT_MS = 5000L
         private const val ACCESSIBILITY_SERVICE_NOT_AVAILABLE = "Accessibility service not available"
@@ -1872,7 +1873,7 @@ class ApiHandler(
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .build()
 
-            notificationManager.notify(3001, notification)
+            notificationManager.notify(STREAM_START_NOTIFICATION_ID, notification)
 
             return ApiResponse.Success("waiting_for_user_notification_tap")
         }

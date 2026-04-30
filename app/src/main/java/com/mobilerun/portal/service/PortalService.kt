@@ -25,7 +25,7 @@ class PortalService : Service(), ConfigManager.ConfigChangeListener {
     companion object {
         private const val TAG = "PortalService"
         private const val CHANNEL_ID = "portal_service_channel"
-        private const val NOTIFICATION_ID = 3001
+        private const val NOTIFICATION_ID = 3002
 
         @Volatile
         private var instance: PortalService? = null
