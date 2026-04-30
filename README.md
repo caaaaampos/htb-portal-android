@@ -77,6 +77,31 @@ See [Reverse Connection](docs/reverse-connection.md) for configuration details a
 Trigger JSON-RPC methods are documented in [Triggers and Events](docs/triggers.md).
 The operator-facing screen-awake watchdog can also be enabled from **Settings** with **Keep Screen Awake**, or over WebSocket with `screen/keepAwake/set` and `screen/keepAwake/status`.
 
+### 📴 Local No-Accessibility Mode
+
+Mobilerun Portal also has an explicit no-accessibility mode for local HTTP and WebSocket hosting. This is separate from the reverse WebSocket headless fallback: reverse control already exposes a small subset when Accessibility is not ready, while local no-accessibility mode starts a foreground `PortalService` so the local servers can run without the AccessibilityService.
+
+In no-accessibility mode, endpoints that do not need Accessibility can respond, but UI tree extraction, gestures, overlay operations, and screenshots still require the AccessibilityService and will fail normally.
+
+```bash
+# Make sure the AccessibilityService is not the owner of the local server ports.
+adb shell settings put secure enabled_accessibility_services ""
+
+# Enable no-accessibility local server mode.
+adb shell content insert --uri content://com.mobilerun.portal/set_no_a11y_mode --bind enabled:b:true
+
+# Enable local HTTP on the default port 8080, or pass a custom port.
+adb shell content insert --uri content://com.mobilerun.portal/toggle_socket_server --bind enabled:b:true
+adb shell content insert --uri content://com.mobilerun.portal/toggle_socket_server --bind enabled:b:true --bind port:i:8080
+
+# Enable local WebSocket on the default port 8081, or pass a custom port.
+adb shell content insert --uri content://com.mobilerun.portal/toggle_websocket_server --bind enabled:b:true
+adb shell content insert --uri content://com.mobilerun.portal/toggle_websocket_server --bind enabled:b:true --bind port:i:8081
+
+# Disable no-accessibility mode and stop the foreground PortalService.
+adb shell content insert --uri content://com.mobilerun.portal/set_no_a11y_mode --bind enabled:b:false
+```
+
 ### 🧭 Transport Matrix
 
 | Capability | ADB ContentProvider | Local HTTP | Local WebSocket | Reverse WebSocket |
@@ -159,8 +184,17 @@ adb shell content insert --uri content://com.mobilerun.portal/overlay_visible --
 # Configure REST API socket server port (default: 8080)
 adb shell content insert --uri content://com.mobilerun.portal/socket_port --bind port:i:8090
 
+# Enable/disable local HTTP socket server (default port: 8080)
+adb shell content insert --uri content://com.mobilerun.portal/toggle_socket_server --bind enabled:b:true --bind port:i:8080
+adb shell content insert --uri content://com.mobilerun.portal/toggle_socket_server --bind enabled:b:false
+
 # Enable/disable local WebSocket server (default port: 8081)
 adb shell content insert --uri content://com.mobilerun.portal/toggle_websocket_server --bind enabled:b:true --bind port:i:8081
+adb shell content insert --uri content://com.mobilerun.portal/toggle_websocket_server --bind enabled:b:false
+
+# Enable/disable explicit no-accessibility local server mode
+adb shell content insert --uri content://com.mobilerun.portal/set_no_a11y_mode --bind enabled:b:true
+adb shell content insert --uri content://com.mobilerun.portal/set_no_a11y_mode --bind enabled:b:false
 
 # Enable or disable the keep-screen-awake watchdog
 adb shell content insert --uri content://com.mobilerun.portal/toggle_screen_keep_awake --bind enabled:b:true

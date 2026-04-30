@@ -65,8 +65,11 @@ class ApiHandler(
         private const val INSTALL_FREE_SPACE_MARGIN_BYTES = 200L * 1024 * 1024 // 200 MiB
         private const val INSTALL_UI_DELAY_MS = 1000L
         private const val MAX_ERROR_BODY_SIZE = 2048
+        private const val STREAM_START_NOTIFICATION_ID = 3001
         private const val ENABLE_UI_STOP_FALLBACK = true
         private const val FORCE_STOP_SCREEN_READY_TIMEOUT_MS = 5000L
+        private const val ACCESSIBILITY_SERVICE_NOT_AVAILABLE = "Accessibility service not available"
+        private const val APP_LAUNCH_REQUIRES_ACCESSIBILITY = "App launch requires Accessibility service"
         const val ACTION_INSTALL_RESULT = "com.mobilerun.portal.action.INSTALL_RESULT"
         const val EXTRA_INSTALL_SUCCESS = "install_success"
         const val EXTRA_INSTALL_MESSAGE = "install_message"
@@ -119,24 +122,36 @@ class ApiHandler(
     // Queries
     fun ping() = ApiResponse.Success("pong")
 
+    private fun requireAccessibilityService(): ApiResponse.Error? {
+        return if (stateRepo.hasAccessibilityService) {
+            null
+        } else {
+            ApiResponse.Error(ACCESSIBILITY_SERVICE_NOT_AVAILABLE)
+        }
+    }
+
     fun getTree(): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val elements = stateRepo.getVisibleElements()
         val json = elements.map { JsonBuilders.elementNodeToJson(it) }
         return ApiResponse.Success(JSONArray(json).toString())
     }
 
     fun getTreeFull(filter: Boolean): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val tree = stateRepo.getFullTree(filter)
             ?: return ApiResponse.Error("No active window or root filtered out")
         return ApiResponse.Success(tree.toString())
     }
 
     fun getPhoneState(): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val state = stateRepo.getPhoneState()
         return ApiResponse.Success(JsonBuilders.phoneStateToJson(state).toString())
     }
 
     fun getState(): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val elements = stateRepo.getVisibleElements()
         val treeJson = elements.map { JsonBuilders.elementNodeToJson(it) }
         val phoneStateJson = JsonBuilders.phoneStateToJson(stateRepo.getPhoneState())
@@ -149,6 +164,7 @@ class ApiHandler(
     }
 
     fun getStateFull(filter: Boolean): ApiResponse {
+        requireAccessibilityService()?.let { return it }
         val tree = stateRepo.getFullTree(filter)
             ?: return ApiResponse.Error("No active window or root filtered out")
         val phoneStateJson = JsonBuilders.phoneStateToJson(stateRepo.getPhoneState())
@@ -483,10 +499,12 @@ class ApiHandler(
     }
 
     fun startApp(packageName: String, activityName: String? = null): ApiResponse {
-        val service = MobilerunAccessibilityService.getInstance()
-            ?: return ApiResponse.Error("Accessibility Service not available")
+        if (!stateRepo.hasAccessibilityService) {
+            return ApiResponse.Error(APP_LAUNCH_REQUIRES_ACCESSIBILITY)
+        }
 
         return try {
+            val pm = getPackageManager()
             val intent = if (!activityName.isNullOrEmpty() && activityName != "null") {
                 Intent().apply {
                     setClassName(
@@ -496,13 +514,13 @@ class ApiHandler(
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
             } else {
-                service.packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                pm.getLaunchIntentForPackage(packageName)?.apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
             }
 
             if (intent != null) {
-                service.startActivity(intent)
+                context.startActivity(intent)
                 ApiResponse.Success("Started app $packageName")
             } else {
                 Log.e(
@@ -516,8 +534,8 @@ class ApiHandler(
                     fallbackIntent.setPackage(packageName)
                     fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-                    if (fallbackIntent.resolveActivity(service.packageManager) != null) {
-                        service.startActivity(fallbackIntent)
+                    if (fallbackIntent.resolveActivity(pm) != null) {
+                        context.startActivity(fallbackIntent)
                         ApiResponse.Success("Started app $packageName (fallback)")
                     } else {
                         ApiResponse.Error("Could not create intent for $packageName")
@@ -1860,7 +1878,7 @@ class ApiHandler(
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .build()
 
-            notificationManager.notify(3001, notification)
+            notificationManager.notify(STREAM_START_NOTIFICATION_ID, notification)
 
             return ApiResponse.Success("waiting_for_user_notification_tap")
         }

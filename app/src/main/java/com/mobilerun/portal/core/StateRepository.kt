@@ -8,6 +8,9 @@ import org.json.JSONObject
 
 class StateRepository(private val service: MobilerunAccessibilityService?) {
 
+    val hasAccessibilityService: Boolean
+        get() = service != null
+
     fun getVisibleElements(): List<ElementNode> = service?.getVisibleElements() ?: emptyList()
 
     fun getFullTree(filter: Boolean): JSONObject? {
